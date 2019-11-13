@@ -48,4 +48,4 @@ Function Get-RvcVsanClusterWitnessInfo {
     }
 
     # Example Call
-    Get-RvcVsanClusterWitnessInfo -Cluster vSANCluster
+    Get-RvcVsanClusterWitnessInfo -Cluster ClusterName
