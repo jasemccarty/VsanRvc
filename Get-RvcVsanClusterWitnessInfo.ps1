@@ -31,7 +31,8 @@ Function Get-RvcVsanClusterWitnessInfo {
         $AdvWitInfo = ((Get-Cluster -Name $Cluster | Get-VMHost | Select-Object -First 1 | Get-EsxCli -V2 ).vsan.cluster.unicastagent.list.Invoke()).Where{$_.IsWitness -eq 1}
         $WitnessIP = $AdvWitInfo.IPAddress
         $WitnessUuid = $AdvWitInfo.NodeUuid
-
+        
+        # Report the Witness information as the vsan.stretchedcluster.witness_info RVC Command would
         Write-Host "+------------------------+--------------------------------------+"
         Write-Host "  Stretched Cluster      | " $Cluster
         Write-Host "+------------------------+--------------------------------------+"
