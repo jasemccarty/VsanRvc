@@ -55,6 +55,39 @@ Function Get-RvcVsanHostInfo {
             Write-Host " - Disk Version:" $Disk.DiskFormatVersion                
         }
     }
+
+    # Fault Domain Information
+    Write-Host "  Fault Domain Info:" -ForegroundColor Green
+    Write-Host "  " (Get-VsanFaultDomain -VMhost $CurrentHost)
+
+    # Retrieve any Networking Information
+    Write-Host "  Network Info:" -ForegroundColor Green
+
+    # Retrieve any VMkernel interfaces that have vSAN Traffic Tagged
+    $HostAdapter = ($CurrentHost | Get-VMHostNetworkAdapter).Where{$_.VsanTrafficEnabled -eq $True}
+    If ($HostAdapter) {
+        Write-Host "    Adapter: " $HostAdapter.Name "(" $HostAdapter.IP ") - vSAN Traffic"        
+    } else {
+        Write-Host "    Adapter: "
+    }
+
+    # Attempt to return any interfaces that have vSAN Traffic Enabled - Will not work on a vSAN Witness Host
+    Try {
+        $WitnessAdapter = ($CurrentEsxCli.vsan.network.list.invoke()).Where{$_.TrafficType -eq "witness"}
+        If ($WitnessAdapter) {
+            $WitnessIP = (Get-VMHostNetworkAdapter -VMhost $CurrentHost).Where{$_.DeviceName -eq $WitnessAdapter.VmkNicName}
+            Write-Host "    Adapter: " $WitnessAdapter.VmkNicName "(" $WitnessIP.IP ") - Witness Traffic"
+        }
+    } Catch {}
+
+    # Attempt to return the Encryption State - Will not work on a vSAN Witness Host
+    Try {
+        $EncryptionInfo = ($CurrentEsxCli.vsan.encryption.info.get.invoke()).Where{$_.Attribute -eq "enabled"}
+        Write-Host "  Encryption enabled:" $EncryptionInfo.Value  -ForegroundColor Green
+    } Catch {}
+    Write-Host " "
     
+}
+
 # Example
 Get-RvcVsanHostInfo -VsanHost "VsanHostName"
