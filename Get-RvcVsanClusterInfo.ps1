@@ -1,4 +1,4 @@
-Function Get-VsanHostInfo {
+Function Get-RvcVsanHostInfo {
     <#
     .NOTES
     ===========================================================================
@@ -121,7 +121,7 @@ Function Get-RvcVsanClusterInfo {
         $VsanWitnessHost = $VsanCluster.WitnessHost
 
         # Call Get-VsanHostInfo with the vSAN Witness Host
-        Get-VsanHostInfo -VsanHost $VsanWitnessHost
+        Get-RvcVsanHostInfo -VsanHost $VsanWitnessHost
 
     }
 
@@ -130,7 +130,7 @@ Function Get-RvcVsanClusterInfo {
 
     Foreach ($ClusterHost in $ClusterHosts) {
         # Call Get-VsanHostInfo with the vSAN Witness Host
-        Get-VsanHostInfo -VsanHost $ClusterHost
+        Get-RvcVsanHostInfo -VsanHost $ClusterHost
     }
                 Write-Host " "
 
@@ -154,8 +154,4 @@ Function Get-RvcVsanClusterInfo {
 }
 
 #Example 
-Get-RvcVsanClusterInfo -Cluster StretchedCluster
-
-
-
 Get-RvcVsanClusterInfo -Cluster StretchedCluster
