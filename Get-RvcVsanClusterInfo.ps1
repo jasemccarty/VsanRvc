@@ -1,3 +1,93 @@
+Function Get-VsanHostInfo {
+    <#
+    .NOTES
+    ===========================================================================
+        Created by:    Jase McCarty
+        Organization:  VMware
+        Blog:          https://jasemccarty.com
+        Twitter:       @jasemccarty
+    ===========================================================================
+    .SYNOPSIS
+        This function retrives vSAN host information
+    .DESCRIPTION
+        This function retrives vSAN host information
+    .PARAMETER VsanHost 
+        vSAN Host 
+    .EXAMPLE
+        Get-VsanHostInfo -VsanHost <hostname>
+    #> 
+    [CmdletBinding()]
+    Param([Parameter(Mandatory = $True)][String]$VsanHost)
+
+    # Print the vSAN Witness Host Information
+    $CurrentHost = Get-VMhost -Name $VsanHost
+
+    Write-Host "Host:" $CurrentHost.Name " " -ForegroundColor Green
+    Write-Host "  Product:" $CurrentHost.Version ", Build:" $CurrentHost.Build
+
+    # Setup EsxCli for the Current Host 
+    $CurrentEsxCli = Get-EsxCli -VMHost $CurrentHost.Name -V2
+
+    # Get the Cluster Details
+    $HostClusterInfo = $CurrentEsxCli.vsan.cluster.get.invoke()
+    Write-Host "  Cluster info:" -ForegroundColor Green
+    Write-Host "    Cluster role:" $HostClusterInfo.LocalNodeState
+    Write-Host "    Cluster UUID:" $HostClusterInfo.SubClusterUUID
+    Write-Host "    Node UUID   :" $HostClusterInfo.LocalNodeUUID
+    Write-Host "    Member UUIDs: " $HostClusterInfo.SubClusterMemberUUIDs
+    Write-Host "    Member Hosts: " $HostClusterInfo.SubClusterMemberHostNames
+    Write-Host "    Node Type   :" $HostClusterInfo.LocalNodeType
+    Write-Host "  Storage info:" -ForegroundColor Green
+    Write-Host "    Disk Mappings:"
+
+    # Enumerate all the Disk Groups, and sorting by Cache Device first.
+    Foreach ($DiskGroup in (Get-VsanDiskGroup -VMHost $CurrentHost)) {
+        $CurrentDiskGroup = $DiskGroup | Get-VsanDisk | Sort-Object -Property IsCacheDisk -Descending
+        Foreach ($Disk in $CurrentDiskGroup) {
+            If ($Disk.IsCacheDisk -eq $true) {
+                Write-Host "      Cache Tier   : " -NoNewline
+            } else {
+                Write-Host "      Capacity Tier: " -NoNewline
+            }
+            $DiskCapacity = [math]::Round($Disk.CapacityGB)
+            Write-Host $Disk.CanonicalName " - Size:" -NoNewLine
+            Write-Host $DiskCapacity "GB" -NoNewLine
+            Write-Host " - Disk Version:" $Disk.DiskFormatVersion                
+        }
+    }
+
+    # Fault Domain Information
+    Write-Host "  Fault Domain Info:" -ForegroundColor Green
+    Write-Host "  " (Get-VsanFaultDomain -VMhost $CurrentHost)
+
+    # Retrieve any Networking Information
+    Write-Host "  Network Info:" -ForegroundColor Green
+
+    # Retrieve any VMkernel interfaces that have vSAN Traffic Tagged
+    $HostAdapter = ($CurrentHost | Get-VMHostNetworkAdapter).Where{$_.VsanTrafficEnabled -eq $True}
+    If ($HostAdapter) {
+        Write-Host "    Adapter: " $HostAdapter.Name "(" $HostAdapter.IP ") - vSAN Traffic"        
+    } else {
+        Write-Host "    Adapter: "
+    }
+
+    # Attempt to return any interfaces that have vSAN Traffic Enabled - Will not work on a vSAN Witness Host
+    Try {
+        $WitnessAdapter = ($CurrentEsxCli.vsan.network.list.invoke()).Where{$_.TrafficType -eq "witness"}
+        If ($WitnessAdapter) {
+            $WitnessIP = (Get-VMHostNetworkAdapter -VMhost $CurrentHost).Where{$_.DeviceName -eq $WitnessAdapter.VmkNicName}
+            Write-Host "    Adapter: " $WitnessAdapter.VmkNicName "(" $WitnessIP.IP ") - Witness Traffic"
+        }
+    } Catch {}
+
+    # Attempt to return the Encryption State - Will not work on a vSAN Witness Host
+    Try {
+        $EncryptionInfo = ($CurrentEsxCli.vsan.encryption.info.get.invoke()).Where{$_.Attribute -eq "enabled"}
+        Write-Host "  Encryption enabled:" $EncryptionInfo.Value  -ForegroundColor Green
+    } Catch {}
+    Write-Host " "
+}
+
 Function Get-RvcVsanClusterInfo {
     <#
         .NOTES
@@ -17,7 +107,8 @@ Function Get-RvcVsanClusterInfo {
             Get-RvcVsanClusterInfo -Cluster vSANCluster
 
     #>
-    [CmdletBinding()]Param([Parameter(Mandatory = $True)][String]$Cluster)
+    [CmdletBinding()]
+    Param([Parameter(Mandatory = $True)][String]$Cluster)
 
     Write-Host " "
 
@@ -26,87 +117,22 @@ Function Get-RvcVsanClusterInfo {
 
     If ($VsanCluster.StretchedClusterEnabled -eq $True) {
 
-        # Print the vSAN Witness Host Information
+        # Get the vSAN Witness Host Information
         $VsanWitnessHost = $VsanCluster.WitnessHost
 
-        Write-Host "Host:" $VsanWitnessHost.Name " " -ForegroundColor Green
-        Write-Host "  Product:" $VsanWitnessHost.Version ", Build:" $VsanWitnessHost.Build
-        $WitnessEsxCli = Get-EsxCli -VMHost $VsanWitnessHost.Name -V2
-        $WitnessClusterGet = $WitnessEsxCli.vsan.cluster.get.invoke()
-        Write-Host "  Cluster info:" -ForegroundColor Green
-        Write-Host "    Cluster role:" $WitnessClusterGet.LocalNodeState
-        Write-Host "    Cluster UUID:" $WitnessClusterGet.SubClusterUUID
-        Write-Host "    Node UUID   :" $WitnessClusterGet.LocalNodeUUID
-        Write-Host "    Member UUIDs: " $WitnessClusterGet.SubClusterMemberUUIDs
-        Write-Host "    Member Hosts: " $WitnessClusterGet.SubClusterMemberHostNames
-        Write-Host "    Node Type   :" $WitnessClusterGet.LocalNodeType
-        Write-Host "  Storage info:" -ForegroundColor Green
-        Write-Host "    Disk Mappings:"
-        Write-Host "      Cache Tier   :" (($VsanWitnessHost | Get-VsanDiskGroup | Get-VsanDisk).Where{$_.IsCacheDisk -eq $True}).CanonicalName
-        Write-Host "      Capacity Tier:" (($VsanWitnessHost | Get-VsanDiskGroup | Get-VsanDisk).Where{$_.IsCacheDisk -ne $True}).CanonicalName
-        Write-Host "  Fault Domain Info:" -ForegroundColor Green
-        Write-Host "  " (Get-VsanFaultDomain -VMhost $VsanWitnessHost)
-        Write-Host "  Network Info:" -ForegroundColor Green
-        $VsanWitnessHostAdapter = ($VsanWitnessHost | Get-VMHostNetworkAdapter).Where{$_.VsanTrafficEnabled -eq $True}
-        If ($VsanWitnessHostAdapter) {
-            Write-Host "    Adapter: " $VsanWitnessHostAdapter.Name "(" $VsanWitnessHostAdapter.IP ")"           
-        } else {
-            Write-Host "    Adapter: "
-        }
+        # Call Get-VsanHostInfo with the vSAN Witness Host
+        Get-VsanHostInfo -VsanHost $VsanWitnessHost
+
     }
 
     # Retrieve all of the vSAN Data Nodes in the Cluster
     $ClusterHosts = Get-Cluster -Name $Cluster | Get-VMHost | Sort-Object Name
 
     Foreach ($ClusterHost in $ClusterHosts) {
-                # Print the vSAN Witness Host Information
-                $CurrentHost = $ClusterHost.Name
-
-                Write-Host "Host:" $ClusterHost.Name " " -ForegroundColor Green
-                Write-Host "  Product:" $ClusterHost.Version", Build:" $ClusterHost.Build
-                $ClusterHostEsxCli = Get-EsxCli -VMHost $ClusterHost.Name -V2
-                $ClusterHostInfo = $ClusterHostEsxCli.vsan.cluster.get.invoke()
-                Write-Host "  Cluster info: " -ForegroundColor Green
-                Write-Host "    Cluster role: " $ClusterHostInfo.LocalNodeState
-                Write-Host "    Cluster UUID: " $ClusterHostInfo.SubClusterUUID
-                Write-Host "    Node UUID   : " $ClusterHostInfo.LocalNodeUUID
-                Write-Host "    Member UUIDs: " $ClusterHostInfo.SubClusterMemberUUIDs
-                Write-Host "    Member Hosts: " $ClusterHostInfo.SubClusterMemberHostNames
-                Write-Host "    Node Type   : " $ClusterHostInfo.LocalNodeType
-                Write-Host "  Storage info:" -ForegroundColor Green
-                Write-Host "    Disk Mappings: "
-                Foreach ($DiskGroup in (Get-VsanDiskGroup -VMHost $CurrentHost)) {
-                    $CurrentDiskGroup = $DiskGroup | Get-VsanDisk | Sort-Object -Property IsCacheDisk -Descending
-                    Foreach ($Disk in $CurrentDiskGroup) {
-                        If ($Disk.IsCacheDisk -eq $true) {
-                            Write-Host "      Cache Tier   : " -NoNewline
-                        } else {
-                            Write-Host "      Capacity Tier: " -NoNewline
-                        }
-                        Write-Host $Disk.CanonicalName                
-                    }
-                    Write-Host "  Fault Domain Info:" -ForegroundColor Green
-                    Write-Host "  " (Get-VsanFaultDomain -VMhost $ClusterHost)
-                    Write-Host "  Network Info:" -ForegroundColor Green
-                    $ClusterHostAdapter = ($ClusterHost | Get-VMHostNetworkAdapter).Where{$_.VsanTrafficEnabled -eq $True}
-                    If ($ClusterHostAdapter) {
-                        Write-Host "    Adapter: " $ClusterHostAdapter.Name "(" $ClusterHostAdapter.IP ") - vSAN Traffic"        
-                    } else {
-                        Write-Host "    Adapter: "
-                    }
-                    $WitnessTrafficAdapter = ($ClusterHostEsxCli.vsan.network.list.invoke()).Where{$_.TrafficType -eq "witness"}
-                    If ($WitnessTrafficAdapter) {
-                        $WitnessTrafficIP = (Get-VMHostNetworkAdapter -VMhost $ClusterHost).Where{$_.DeviceName -eq $WitnessTrafficAdapter.VmkNicName}
-                        Write-Host "    Adapter: " $WitnessTrafficAdapter.VmkNicName "(" $WitnessTrafficIP.IP ") - Witness Traffic"
-                    }
-
-
-                    $EncryptionInfo = ($ClusterHostEsxCli.vsan.encryption.info.get.invoke()).Where{$_.Attribute -eq "enabled"}
-                        Write-Host "  Encryption enabled:" $EncryptionInfo.Value  -ForegroundColor Green
-                }
+        # Call Get-VsanHostInfo with the vSAN Witness Host
+        Get-VsanHostInfo -VsanHost $ClusterHost
+    }
                 Write-Host " "
-    } 
-    Write-Host " "
 
     # Look for any Fault Domains
     $VsanFaultDomains = Get-VsanFaultDomain -Cluster $Cluster
@@ -119,10 +145,17 @@ Function Get-RvcVsanClusterInfo {
             Write-Host " "
         }
     }
+
+    # If it is a 2 Node or Stretched vSAN Cluster, print the Preferred Fault Domain
     If ($VsanCluster.StretchedClusterEnabled -eq $True) {
         Write-Host " "
         Write-Host "Stretched Cluster Preferred Fault Domain:" $VsanCluster.PreferredFaultDomain -ForegroundColor Green
     }
 }
+
+#Example 
+Get-RvcVsanClusterInfo -Cluster StretchedCluster
+
+
 
 Get-RvcVsanClusterInfo -Cluster StretchedCluster
